@@ -1,21 +1,23 @@
 const express = require('express');
 const {
-  initDb,
-  createTask,
-  getTask,
-  listTasks,
-  getStats,
+  Storage,
   STATUS_PENDING,
   STATUS_RUNNING,
   STATUS_COMPLETED,
   STATUS_FAILED,
-} = require('./db');
+} = require('./storage');
+const { createDefaultRegistry } = require('./executors');
 const TaskScheduler = require('./scheduler');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(express.json());
+
+app.use((req, res, next) => {
+  req.storage = app.get('storage');
+  next();
+});
 
 function formatTask(task) {
   return {
@@ -46,7 +48,6 @@ function resolveScheduledAt({ delay_seconds, scheduled_at }) {
 
   let target;
   let requestedTime = null;
-  let errorCode = null;
 
   if (scheduled_at !== undefined) {
     requestedTime = String(scheduled_at);
@@ -116,13 +117,13 @@ app.post('/tasks', (req, res) => {
     return res.status(400).json(resolved);
   }
 
-  const taskId = createTask(url, methodUpper, headers || null, body || null, resolved.scheduledAt);
+  const taskId = req.storage.createTask(url, methodUpper, headers || null, body || null, resolved.scheduledAt);
 
   return res.status(201).json({ task_id: taskId, scheduled_at: resolved.scheduledAt });
 });
 
 app.get('/tasks/:id', (req, res) => {
-  const task = getTask(req.params.id);
+  const task = req.storage.getTask(req.params.id);
   if (!task) {
     return res.status(404).json({ error: 'Task not found' });
   }
@@ -130,12 +131,12 @@ app.get('/tasks/:id', (req, res) => {
 });
 
 app.get('/tasks', (req, res) => {
-  const tasks = listTasks();
+  const tasks = req.storage.listTasks();
   return res.json(tasks.map(formatTask));
 });
 
 app.get('/stats', (req, res) => {
-  const stats = getStats();
+  const stats = req.storage.getStats();
   return res.json(stats);
 });
 
@@ -146,8 +147,12 @@ app.get('/health', (req, res) => {
 let scheduler;
 
 async function startServer() {
-  await initDb();
-  scheduler = new TaskScheduler(5);
+  const storage = new Storage();
+  await storage.init();
+  app.set('storage', storage);
+
+  const executorRegistry = createDefaultRegistry();
+  scheduler = new TaskScheduler(storage, executorRegistry, { maxWorkers: 5 });
   scheduler.start();
 
   const server = app.listen(PORT, () => {

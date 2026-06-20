@@ -3,17 +3,24 @@ const {
   STATUS_RUNNING,
   STATUS_COMPLETED,
   STATUS_FAILED,
-  getPendingTasks,
-  updateTaskStatus,
-  completeTask,
-} = require('./db');
+} = require('../storage');
 
 const MAX_WORKERS = 5;
 const POLL_INTERVAL = 1000;
 
 class TaskScheduler {
-  constructor(maxWorkers = MAX_WORKERS) {
-    this.maxWorkers = maxWorkers;
+  constructor(storage, executorRegistry, options = {}) {
+    if (!storage || typeof storage.getPendingTasks !== 'function') {
+      throw new Error('TaskScheduler requires a valid Storage instance');
+    }
+    if (!executorRegistry || typeof executorRegistry.resolve !== 'function') {
+      throw new Error('TaskScheduler requires a valid ExecutorRegistry instance');
+    }
+
+    this.storage = storage;
+    this.executors = executorRegistry;
+    this.maxWorkers = options.maxWorkers || MAX_WORKERS;
+    this.pollInterval = options.pollInterval || POLL_INTERVAL;
     this.inProgress = new Set();
     this.running = false;
     this.pollTimer = null;
@@ -38,14 +45,14 @@ class TaskScheduler {
     this._dispatchPendingTasks().catch((err) => {
       console.error('Scheduler poll error:', err);
     });
-    this.pollTimer = setTimeout(() => this._pollLoop(), POLL_INTERVAL);
+    this.pollTimer = setTimeout(() => this._pollLoop(), this.pollInterval);
   }
 
   async _dispatchPendingTasks() {
     const available = this.maxWorkers - this.inProgress.size;
     if (available <= 0) return;
 
-    const pending = getPendingTasks();
+    const pending = this.storage.getPendingTasks();
     const toRun = pending.filter((t) => !this.inProgress.has(t.id)).slice(0, available);
 
     for (const task of toRun) {
@@ -60,48 +67,21 @@ class TaskScheduler {
     const taskId = task.id;
     try {
       const startedAt = new Date().toISOString();
-      updateTaskStatus(taskId, STATUS_RUNNING, startedAt);
+      this.storage.updateTaskStatus(taskId, STATUS_RUNNING, startedAt);
 
       const startTime = Date.now();
-      const method = task.method.toUpperCase();
-      const url = task.url;
-      const headers = task.headers ? JSON.parse(task.headers) : {};
-      const body = task.body;
-
-      const options = {
-        method,
-        headers,
-        timeout: 30000,
-      };
-
-      if (method === 'POST' && body !== null && body !== undefined) {
-        options.body = body;
-      }
-
-      let responseText;
-      let success = true;
-
-      try {
-        const resp = await fetch(url, options);
-        const text = await resp.text();
-        responseText = text.slice(0, 500);
-        if (!resp.ok) {
-          success = false;
-        }
-      } catch (fetchErr) {
-        success = false;
-        responseText = String(fetchErr.message || fetchErr).slice(0, 500);
-      }
-
+      const executor = this.executors.resolve(task);
+      const result = await executor.execute(task);
       const durationMs = Date.now() - startTime;
-      const completedAt = new Date().toISOString();
-      const status = success ? STATUS_COMPLETED : STATUS_FAILED;
 
-      completeTask(taskId, status, responseText, durationMs, completedAt);
+      const completedAt = new Date().toISOString();
+      const status = result.success ? STATUS_COMPLETED : STATUS_FAILED;
+
+      this.storage.completeTask(taskId, status, result.response, durationMs, completedAt);
     } catch (err) {
       const completedAt = new Date().toISOString();
       const errorMsg = String(err.message || err).slice(0, 500);
-      completeTask(taskId, STATUS_FAILED, errorMsg, 0, completedAt);
+      this.storage.completeTask(taskId, STATUS_FAILED, errorMsg, 0, completedAt);
     } finally {
       this.inProgress.delete(taskId);
     }

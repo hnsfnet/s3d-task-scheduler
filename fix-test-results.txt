@@ -6,7 +6,7 @@ HTTP status: 400
 Error: 指定的执行时间已过期
 error_code: time_in_past
 requested_time: 2020-01-01T00:00:00Z
-server_time: 2026-06-20T23:13:02.113Z
+server_time: 2026-06-20T23:21:48.523Z
 Has both times: true
 
 === Test 2: Invalid format error ===
@@ -15,16 +15,16 @@ Error: 指定的执行时间格式无效，请使用 ISO 8601 格式（如 2026-
 error_code: invalid_format
 
 === Test 3: Dedupe - rapid identical submissions ===
-5 submissions, task_ids: ["fc43936c-4de0-4341-8fa5-5629cef7cbc6","fc43936c-4de0-4341-8fa5-5629cef7cbc6","fc43936c-4de0-4341-8fa5-5629cef7cbc6","fc43936c-4de0-4341-8fa5-5629cef7cbc6","fc43936c-4de0-4341-8fa5-5629cef7cbc6"]
+5 submissions, task_ids: ["c4d0f45e-5ba3-4001-85f5-f998ba9f4c7f","c4d0f45e-5ba3-4001-85f5-f998ba9f4c7f","c4d0f45e-5ba3-4001-85f5-f998ba9f4c7f","c4d0f45e-5ba3-4001-85f5-f998ba9f4c7f","c4d0f45e-5ba3-4001-85f5-f998ba9f4c7f"]
 Unique task_ids count: 1 (expected: 1)
 Dedupe works: true
 
 === Test 4: Dedupe - different task is not deduped ===
-Different task id: 064f05a9-bb4b-4853-be94-d5534d78ac0c
+Different task id: a28d87d4-3b7e-41de-aa98-2bf2767ea1a7
 Is different from first: true
 
 === Test 5: Dedupe - after 2 seconds window passes, new task is created ===
-After window task id: 0bfe6188-3ec7-468d-bf1a-23b5461faad8
+After window task id: bc720e46-a152-42ad-937a-69999775df63
 Is different from first: true
 
 === All tests passed! ===
