@@ -1,0 +1,13 @@
+{
+  "name": "task-scheduler",
+  "version": "1.0.0",
+  "description": "HTTP task scheduler service with SQLite storage",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "sql.js": "^1.14.1"
+  }
+}
