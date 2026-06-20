@@ -1,0 +1,30 @@
+=== Test 0: Health check ===
+Health: {"status":"ok"}
+
+=== Test 1: Past scheduled_at error detail ===
+HTTP status: 400
+Error: 指定的执行时间已过期
+error_code: time_in_past
+requested_time: 2020-01-01T00:00:00Z
+server_time: 2026-06-20T23:13:02.113Z
+Has both times: true
+
+=== Test 2: Invalid format error ===
+HTTP status: 400
+Error: 指定的执行时间格式无效，请使用 ISO 8601 格式（如 2026-06-21T10:00:00Z）
+error_code: invalid_format
+
+=== Test 3: Dedupe - rapid identical submissions ===
+5 submissions, task_ids: ["fc43936c-4de0-4341-8fa5-5629cef7cbc6","fc43936c-4de0-4341-8fa5-5629cef7cbc6","fc43936c-4de0-4341-8fa5-5629cef7cbc6","fc43936c-4de0-4341-8fa5-5629cef7cbc6","fc43936c-4de0-4341-8fa5-5629cef7cbc6"]
+Unique task_ids count: 1 (expected: 1)
+Dedupe works: true
+
+=== Test 4: Dedupe - different task is not deduped ===
+Different task id: 064f05a9-bb4b-4853-be94-d5534d78ac0c
+Is different from first: true
+
+=== Test 5: Dedupe - after 2 seconds window passes, new task is created ===
+After window task id: 0bfe6188-3ec7-468d-bf1a-23b5461faad8
+Is different from first: true
+
+=== All tests passed! ===

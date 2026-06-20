@@ -1,0 +1,35 @@
+=== Bugfix 1: 过期时间详细错误信息 ===
+
+--- Test 1a: scheduled_at 过去时间 ---
+HTTP status: 400 (expect 400)
+error: 指定的执行时间已过期
+details.message: 指定的执行时间已过期
+details.scheduled_time: 2020-01-01T00:00:00.000Z
+details.server_time: 2026-06-20T23:02:07.613Z
+details.provided_value: 2020-01-01T00:00:00Z
+
+--- Test 1b: scheduled_at 格式无效 ---
+HTTP status: 400 (expect 400)
+error: scheduled_at is not a valid datetime
+details.message: 指定的执行时间格式无效
+details.provided_value: not-a-date
+details.expected_format: ISO 8601, e.g. 2026-06-21T10:00:00Z
+
+=== Bugfix 2: 并发重复提交去重 ===
+
+--- Test 2a: 快速连续提交同一任务 10 次 ---
+201 (created) count: 10 (expect 1)
+409 (duplicate) count: 0 (expect 9)
+FAIL: unexpected result
+
+Created task_id: 3ae1c508-8220-45cb-84ba-b48f0e7fe391
+--- Test 2b: 等待 2.5 秒后再次提交同一任务，应允许创建 ---
+HTTP status: 201 (expect 201)
+task_id: eee78271-c96a-4daa-8c37-b52f5e91386c
+PASS: 2秒后可创建新任务
+
+--- Test 2c: 不同参数的任务不应被去重 ---
+HTTP status: 201 (expect 201)
+PASS: 不同URL任务正常创建
+
+=== All bugfix tests complete ===

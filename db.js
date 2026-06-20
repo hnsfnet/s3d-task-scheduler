@@ -10,8 +10,13 @@ const STATUS_RUNNING = 'running';
 const STATUS_COMPLETED = 'completed';
 const STATUS_FAILED = 'failed';
 
+const DEDUPE_WINDOW_MS = 2000;
+
 let db = null;
 let SQL = null;
+
+const recentTasks = new Map();
+let dedupeCleanupTimer = null;
 
 async function initDb() {
   if (db) return db;
@@ -72,9 +77,42 @@ function generateId() {
   return crypto.randomUUID();
 }
 
+function taskFingerprint(url, method, headers, body, scheduledAt) {
+  const headersStr = headers ? JSON.stringify(headers) : '';
+  const bodyStr = body ?? '';
+  const schedStr = scheduledAt ?? '';
+  const raw = `${method}:${url}:${headersStr}:${bodyStr}:${schedStr}`;
+  return crypto.createHash('sha1').update(raw).digest('hex');
+}
+
+function cleanupDedupeCache() {
+  const now = Date.now();
+  for (const [fp, info] of recentTasks) {
+    if (now - info.created_at_ms > DEDUPE_WINDOW_MS) {
+      recentTasks.delete(fp);
+    }
+  }
+}
+
+function startDedupeCleanup() {
+  if (dedupeCleanupTimer) return;
+  dedupeCleanupTimer = setInterval(cleanupDedupeCache, DEDUPE_WINDOW_MS);
+  if (dedupeCleanupTimer.unref) {
+    dedupeCleanupTimer.unref();
+  }
+}
+
 function createTask(url, method, headers, body, scheduledAt) {
+  const fp = taskFingerprint(url, method, headers, body, scheduledAt);
+  const nowMs = Date.now();
+
+  const cached = recentTasks.get(fp);
+  if (cached && nowMs - cached.created_at_ms < DEDUPE_WINDOW_MS) {
+    return cached.task_id;
+  }
+
   const id = generateId();
-  const createdAt = new Date().toISOString();
+  const createdAt = new Date(nowMs).toISOString();
   const headersJson = headers ? JSON.stringify(headers) : null;
 
   const stmt = getDb().prepare(`
@@ -84,6 +122,10 @@ function createTask(url, method, headers, body, scheduledAt) {
   stmt.run([id, url, method, headersJson, body, STATUS_PENDING, createdAt, scheduledAt]);
   stmt.free();
   saveDb();
+
+  recentTasks.set(fp, { task_id: id, created_at_ms: nowMs });
+  startDedupeCleanup();
+
   return id;
 }
 

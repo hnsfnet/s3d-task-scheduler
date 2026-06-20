@@ -45,31 +45,55 @@ function resolveScheduledAt({ delay_seconds, scheduled_at }) {
   }
 
   let target;
+  let requestedTime = null;
+  let errorCode = null;
 
   if (scheduled_at !== undefined) {
+    requestedTime = String(scheduled_at);
     const parsed = new Date(scheduled_at);
     if (isNaN(parsed.getTime())) {
-      return { error: 'scheduled_at is not a valid datetime' };
+      return {
+        error: '指定的执行时间格式无效，请使用 ISO 8601 格式（如 2026-06-21T10:00:00Z）',
+        error_code: 'invalid_format',
+        requested_time: requestedTime,
+        server_time: new Date().toISOString(),
+      };
     }
     target = parsed;
   }
 
   if (delay_seconds !== undefined) {
     if (typeof delay_seconds !== 'number' || isNaN(delay_seconds)) {
-      return { error: 'delay_seconds must be a number' };
+      return {
+        error: 'delay_seconds 必须是数字',
+        error_code: 'invalid_delay',
+        requested_delay: delay_seconds,
+        server_time: new Date().toISOString(),
+      };
     }
     if (delay_seconds < 0) {
-      return { error: 'delay_seconds must not be negative' };
+      return {
+        error: 'delay_seconds 不能为负数',
+        error_code: 'negative_delay',
+        requested_delay: delay_seconds,
+        server_time: new Date().toISOString(),
+      };
     }
     const fromDelay = new Date(Date.now() + delay_seconds * 1000);
     if (!target) {
       target = fromDelay;
+      requestedTime = `delay_seconds=${delay_seconds} (约 ${fromDelay.toISOString()})`;
     }
   }
 
   const now = new Date();
   if (target.getTime() <= now.getTime()) {
-    return { error: 'scheduled time is in the past' };
+    return {
+      error: '指定的执行时间已过期',
+      error_code: 'time_in_past',
+      requested_time: requestedTime || target.toISOString(),
+      server_time: now.toISOString(),
+    };
   }
 
   return { scheduledAt: target.toISOString() };
@@ -89,7 +113,7 @@ app.post('/tasks', (req, res) => {
 
   const resolved = resolveScheduledAt({ delay_seconds, scheduled_at });
   if (resolved.error) {
-    return res.status(400).json({ error: resolved.error });
+    return res.status(400).json(resolved);
   }
 
   const taskId = createTask(url, methodUpper, headers || null, body || null, resolved.scheduledAt);
