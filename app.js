@@ -4,6 +4,7 @@ const {
   createTask,
   getTask,
   listTasks,
+  getStats,
   STATUS_PENDING,
   STATUS_RUNNING,
   STATUS_COMPLETED,
@@ -25,6 +26,7 @@ function formatTask(task) {
     response: task.response,
     duration_ms: task.duration_ms,
     created_at: task.created_at,
+    scheduled_at: task.scheduled_at,
     started_at: task.started_at,
     completed_at: task.completed_at,
   };
@@ -37,8 +39,44 @@ const STATUS_TEXT = {
   [STATUS_FAILED]: '失败',
 };
 
+function resolveScheduledAt({ delay_seconds, scheduled_at }) {
+  if (delay_seconds === undefined && scheduled_at === undefined) {
+    return { scheduledAt: null };
+  }
+
+  let target;
+
+  if (scheduled_at !== undefined) {
+    const parsed = new Date(scheduled_at);
+    if (isNaN(parsed.getTime())) {
+      return { error: 'scheduled_at is not a valid datetime' };
+    }
+    target = parsed;
+  }
+
+  if (delay_seconds !== undefined) {
+    if (typeof delay_seconds !== 'number' || isNaN(delay_seconds)) {
+      return { error: 'delay_seconds must be a number' };
+    }
+    if (delay_seconds < 0) {
+      return { error: 'delay_seconds must not be negative' };
+    }
+    const fromDelay = new Date(Date.now() + delay_seconds * 1000);
+    if (!target) {
+      target = fromDelay;
+    }
+  }
+
+  const now = new Date();
+  if (target.getTime() <= now.getTime()) {
+    return { error: 'scheduled time is in the past' };
+  }
+
+  return { scheduledAt: target.toISOString() };
+}
+
 app.post('/tasks', (req, res) => {
-  const { url, method = 'GET', headers, body } = req.body;
+  const { url, method = 'GET', headers, body, delay_seconds, scheduled_at } = req.body;
 
   if (!url) {
     return res.status(400).json({ error: 'url is required' });
@@ -49,9 +87,14 @@ app.post('/tasks', (req, res) => {
     return res.status(400).json({ error: 'method must be GET or POST' });
   }
 
-  const taskId = createTask(url, methodUpper, headers || null, body || null);
+  const resolved = resolveScheduledAt({ delay_seconds, scheduled_at });
+  if (resolved.error) {
+    return res.status(400).json({ error: resolved.error });
+  }
 
-  return res.status(201).json({ task_id: taskId });
+  const taskId = createTask(url, methodUpper, headers || null, body || null, resolved.scheduledAt);
+
+  return res.status(201).json({ task_id: taskId, scheduled_at: resolved.scheduledAt });
 });
 
 app.get('/tasks/:id', (req, res) => {
@@ -65,6 +108,11 @@ app.get('/tasks/:id', (req, res) => {
 app.get('/tasks', (req, res) => {
   const tasks = listTasks();
   return res.json(tasks.map(formatTask));
+});
+
+app.get('/stats', (req, res) => {
+  const stats = getStats();
+  return res.json(stats);
 });
 
 app.get('/health', (req, res) => {

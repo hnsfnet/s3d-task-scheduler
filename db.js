@@ -37,9 +37,18 @@ async function initDb() {
       duration_ms INTEGER,
       created_at TEXT NOT NULL,
       started_at TEXT,
-      completed_at TEXT
+      completed_at TEXT,
+      scheduled_at TEXT
     )
   `);
+
+  const colInfo = db.exec(`PRAGMA table_info(tasks)`);
+  if (colInfo.length > 0) {
+    const colNames = colInfo[0].values.map((r) => r[1]);
+    if (!colNames.includes('scheduled_at')) {
+      db.run(`ALTER TABLE tasks ADD COLUMN scheduled_at TEXT`);
+    }
+  }
 
   saveDb();
   return db;
@@ -63,16 +72,16 @@ function generateId() {
   return crypto.randomUUID();
 }
 
-function createTask(url, method, headers, body) {
+function createTask(url, method, headers, body, scheduledAt) {
   const id = generateId();
   const createdAt = new Date().toISOString();
   const headersJson = headers ? JSON.stringify(headers) : null;
 
   const stmt = getDb().prepare(`
-    INSERT INTO tasks (id, url, method, headers, body, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tasks (id, url, method, headers, body, status, created_at, scheduled_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  stmt.run([id, url, method, headersJson, body, STATUS_PENDING, createdAt]);
+  stmt.run([id, url, method, headersJson, body, STATUS_PENDING, createdAt, scheduledAt]);
   stmt.free();
   saveDb();
   return id;
@@ -130,12 +139,14 @@ function completeTask(id, status, response, durationMs, completedAt) {
 }
 
 function getPendingTasks() {
+  const now = new Date().toISOString();
   const stmt = getDb().prepare(`
     SELECT * FROM tasks
     WHERE status = ?
+      AND (scheduled_at IS NULL OR scheduled_at <= ?)
     ORDER BY created_at ASC
   `);
-  stmt.bind([STATUS_PENDING]);
+  stmt.bind([STATUS_PENDING, now]);
 
   const tasks = [];
   const columns = stmt.getColumnNames();
@@ -151,6 +162,51 @@ function getPendingTasks() {
   return tasks;
 }
 
+function getStats() {
+  const countByStatus = (status) => {
+    const stmt = getDb().prepare(`SELECT COUNT(*) AS c FROM tasks WHERE status = ?`);
+    stmt.bind([status]);
+    let count = 0;
+    if (stmt.step()) {
+      count = stmt.get()[0];
+    }
+    stmt.free();
+    return count;
+  };
+
+  const totalStmt = getDb().prepare(`SELECT COUNT(*) AS c FROM tasks`);
+  let total = 0;
+  if (totalStmt.step()) {
+    total = totalStmt.get()[0];
+  }
+  totalStmt.free();
+
+  const success = countByStatus(STATUS_COMPLETED);
+  const failed = countByStatus(STATUS_FAILED);
+  const pending = countByStatus(STATUS_PENDING);
+  const running = countByStatus(STATUS_RUNNING);
+
+  const avgStmt = getDb().prepare(`SELECT AVG(duration_ms) AS a FROM tasks WHERE status = ?`);
+  avgStmt.bind([STATUS_COMPLETED]);
+  let avgDurationMs = 0;
+  if (avgStmt.step()) {
+    const val = avgStmt.get()[0];
+    if (val !== null && val !== undefined) {
+      avgDurationMs = Math.round(val);
+    }
+  }
+  avgStmt.free();
+
+  return {
+    total,
+    success,
+    failed,
+    pending,
+    running,
+    avg_duration_ms: avgDurationMs,
+  };
+}
+
 module.exports = {
   initDb,
   getDb,
@@ -160,6 +216,7 @@ module.exports = {
   updateTaskStatus,
   completeTask,
   getPendingTasks,
+  getStats,
   STATUS_PENDING,
   STATUS_RUNNING,
   STATUS_COMPLETED,
