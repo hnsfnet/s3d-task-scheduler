@@ -38,7 +38,7 @@ class HttpExecutor extends BaseExecutor {
     let success = true;
 
     try {
-      const resp = await fetch(url, options);
+      const resp = await globalThis.fetch(url, options);
       const text = await resp.text();
       responseText = text.slice(0, this.responseMaxLength);
       if (!resp.ok) {

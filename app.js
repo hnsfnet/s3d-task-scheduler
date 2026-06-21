@@ -9,15 +9,7 @@ const {
 const { createDefaultRegistry } = require('./executors');
 const TaskScheduler = require('./scheduler');
 
-const app = express();
-const PORT = process.env.PORT || 5000;
-
-app.use(express.json());
-
-app.use((req, res, next) => {
-  req.storage = app.get('storage');
-  next();
-});
+const DEFAULT_PORT = 5000;
 
 function formatTask(task) {
   return {
@@ -100,77 +92,100 @@ function resolveScheduledAt({ delay_seconds, scheduled_at }) {
   return { scheduledAt: target.toISOString() };
 }
 
-app.post('/tasks', (req, res) => {
-  const { url, method = 'GET', headers, body, delay_seconds, scheduled_at } = req.body;
+function createApp() {
+  const app = express();
 
-  if (!url) {
-    return res.status(400).json({ error: 'url is required' });
-  }
+  app.use(express.json());
 
-  const methodUpper = String(method).toUpperCase();
-  if (!['GET', 'POST'].includes(methodUpper)) {
-    return res.status(400).json({ error: 'method must be GET or POST' });
-  }
+  app.use((req, res, next) => {
+    req.storage = app.get('storage');
+    next();
+  });
 
-  const resolved = resolveScheduledAt({ delay_seconds, scheduled_at });
-  if (resolved.error) {
-    return res.status(400).json(resolved);
-  }
+  app.post('/tasks', (req, res) => {
+    const { url, method = 'GET', headers, body, delay_seconds, scheduled_at } = req.body;
 
-  const taskId = req.storage.createTask(url, methodUpper, headers || null, body || null, resolved.scheduledAt);
+    if (!url) {
+      return res.status(400).json({ error: 'url is required' });
+    }
 
-  return res.status(201).json({ task_id: taskId, scheduled_at: resolved.scheduledAt });
-});
+    const methodUpper = String(method).toUpperCase();
+    if (!['GET', 'POST'].includes(methodUpper)) {
+      return res.status(400).json({ error: 'method must be GET or POST' });
+    }
 
-app.get('/tasks/:id', (req, res) => {
-  const task = req.storage.getTask(req.params.id);
-  if (!task) {
-    return res.status(404).json({ error: 'Task not found' });
-  }
-  return res.json(formatTask(task));
-});
+    const resolved = resolveScheduledAt({ delay_seconds, scheduled_at });
+    if (resolved.error) {
+      return res.status(400).json(resolved);
+    }
 
-app.get('/tasks', (req, res) => {
-  const tasks = req.storage.listTasks();
-  return res.json(tasks.map(formatTask));
-});
+    const taskId = req.storage.createTask(
+      url,
+      methodUpper,
+      headers || null,
+      body || null,
+      resolved.scheduledAt
+    );
 
-app.get('/stats', (req, res) => {
-  const stats = req.storage.getStats();
-  return res.json(stats);
-});
+    return res.status(201).json({ task_id: taskId, scheduled_at: resolved.scheduledAt });
+  });
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
+  app.get('/tasks/:id', (req, res) => {
+    const task = req.storage.getTask(req.params.id);
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    return res.json(formatTask(task));
+  });
 
-let scheduler;
+  app.get('/tasks', (req, res) => {
+    const tasks = req.storage.listTasks();
+    return res.json(tasks.map(formatTask));
+  });
 
-async function startServer() {
+  app.get('/stats', (req, res) => {
+    const stats = req.storage.getStats();
+    return res.json(stats);
+  });
+
+  app.get('/health', (req, res) => {
+    res.json({ status: 'ok' });
+  });
+
+  return app;
+}
+
+async function startServer(port = process.env.PORT || DEFAULT_PORT) {
+  const app = createApp();
   const storage = new Storage();
   await storage.init();
   app.set('storage', storage);
 
   const executorRegistry = createDefaultRegistry();
-  scheduler = new TaskScheduler(storage, executorRegistry, { maxWorkers: 5 });
+  const scheduler = new TaskScheduler(storage, executorRegistry, { maxWorkers: 5 });
   scheduler.start();
 
-  const server = app.listen(PORT, () => {
-    console.log(`Task scheduler service started on http://127.0.0.1:${PORT}`);
-  });
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, () => {
+      console.log(`Task scheduler service started on http://127.0.0.1:${port}`);
 
-  const gracefulShutdown = () => {
-    console.log('Shutting down gracefully...');
-    scheduler.stop();
-    server.close(() => {
-      console.log('Server stopped');
-      process.exit(0);
+      const gracefulShutdown = () => {
+        console.log('Shutting down gracefully...');
+        scheduler.stop();
+        server.close(() => {
+          console.log('Server stopped');
+          process.exit(0);
+        });
+        setTimeout(() => process.exit(0), 5000);
+      };
+
+      process.on('SIGINT', gracefulShutdown);
+      process.on('SIGTERM', gracefulShutdown);
+
+      resolve({ app, server, storage, scheduler, port });
     });
-    setTimeout(() => process.exit(0), 5000);
-  };
-
-  process.on('SIGINT', gracefulShutdown);
-  process.on('SIGTERM', gracefulShutdown);
+    server.on('error', reject);
+  });
 }
 
 if (require.main === module) {
@@ -180,4 +195,11 @@ if (require.main === module) {
   });
 }
 
-module.exports = app;
+module.exports = {
+  createApp,
+  startServer,
+  resolveScheduledAt,
+  formatTask,
+  STATUS_TEXT,
+  DEFAULT_PORT,
+};
